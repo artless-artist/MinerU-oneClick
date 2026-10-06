@@ -102,6 +102,60 @@ def models_ready_for(tier: str) -> bool:
     return small if tier == "basic" else (small and vlm)
 
 
+# --------------------------------------------------------------------------
+# 档位偏好（记住使用者选过什么）
+# --------------------------------------------------------------------------
+# 为什么需要这个文件：
+#   「模型齐不齐」与「使用者想用哪一档」是两件事。只想用 basic 的人，常态就是
+#   「小模型在、VLM 故意不装」——如果拿「模型不齐」当询问条件，他每次启动都会
+#   被问一遍「要不要下 VLM」。所以把偏好单独记下来，询问时机改为
+#   「从没选过 + 当前档位真的缺东西」。
+#
+# 放在 models 目录下（与 VLM 的 .mineru_complete 同一层），随模型一起被整体
+# 拷贝/清理；文件极小，只有一行档位名。
+TIER_CHOICE_FILE = MODELS_DIR / ".tier_choice"
+PARTIAL_MARKER = ".partial"  # 与档位名同文件：basic.partial 表示「借用 basic 跑，缺 VLM」
+
+
+def _parse_tier_choice(text: str) -> tuple[str | None, bool]:
+    """解析标记文件内容 -> (档位, 是否为「容忍缺件」状态)。"""
+    lines = [ln.strip().lower() for ln in (text or "").splitlines() if ln.strip()]
+    if not lines:
+        return None, False
+    raw = lines[0]
+    partial = len(lines) > 1 and lines[1] == PARTIAL_MARKER.lstrip(".")
+    tier = raw if raw in ("basic", "standard") else None
+    return tier, partial
+
+
+def read_tier_choice() -> tuple[str | None, bool]:
+    """读取使用者上次选定的档位。
+
+    返回 ``(tier, partial)``：
+
+    * ``tier`` 为 ``"basic"`` / ``"standard"``；从没选过则为 ``None``。
+    * ``partial=True`` 表示上次是「明知缺件也照样用」——例如选了 standard 但
+      VLM 没下成，或者选了 basic 后想留个念想。此时重新启动只做静默提示，
+      不再反复追问。
+    """
+    try:
+        return _parse_tier_choice(TIER_CHOICE_FILE.read_text(encoding="utf-8"))
+    except OSError:
+        return None, False
+
+
+def write_tier_choice(tier: str, *, partial: bool = False) -> None:
+    """落盘使用者选定的档位（失败不抛异常，只是下次会重新问一次）。"""
+    if tier not in ("basic", "standard"):
+        return
+    body = tier if not partial else f"{tier}\n{PARTIAL_MARKER}"
+    try:
+        TIER_CHOICE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        TIER_CHOICE_FILE.write_text(body + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
 def missing_modules() -> list[tuple[str, str]]:
     """返回 [(导入名, 说明), ...]，仅含真正导入不了的。"""
     missing: list[tuple[str, str]] = []

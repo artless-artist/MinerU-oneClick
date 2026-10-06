@@ -17,6 +17,7 @@ from pathlib import Path
 
 import bootstrap
 import env_setup
+import pkg_info
 from env_setup import DATA_DIR, MODELS_DIR, OUTPUT_DIR, PYTHON_EXE, ROOT
 from pkg_info import (
     LLAMA_SERVER,
@@ -103,6 +104,7 @@ def strip_quotes(value: str) -> str:
 # --------------------------------------------------------------------------
 def banner() -> None:
     small, vlm = models_ready()
+    chosen, _partial = pkg_info.read_tier_choice()
     print()
     print(LINE)
     print("  MinerU 4.0.10  便携版   ——  PDF / 图片 / Office 文档  →  Markdown")
@@ -117,7 +119,11 @@ def banner() -> None:
     deps_state = "就绪" if deps_bad == 0 else f"缺失 {deps_bad} 项"
     print(f"  Python 依赖 : {deps_state}")
     print(f"  模型状态 : 小模型 {status_small} / 版面 VLM {status_vlm}   (共 {human(total)})")
-    if deps_bad or not (small and vlm):
+    if chosen is not None:
+        print(f"  解析档位 : {chosen}（回车默认沿用；进入功能时可临时改）")
+    # 只有「当前档位真的不够用」才提示补齐 —— basic 用户不用看 VLM 缺失的告警
+    active = chosen or ("standard" if env_setup.path_is_ascii() else "basic")
+    if deps_bad or not models_ready_for(active):
         print("  [提示] 组件不完整：菜单 [4] 可查看缺什么，[5] 可自动补齐")
     if not env_setup.path_is_ascii():
         print(LINE)
@@ -126,6 +132,69 @@ def banner() -> None:
         print("         请把整个文件夹移到纯英文路径（如 D:\\Tools\\MinerU）后使用；")
         print("         或先改用 basic 档（中文路径下可正常工作）。")
     print(LINE)
+
+
+def ask_tier(*, first_run: bool = False, default: str = "standard") -> str:
+    """询问解析档位，返回 "standard" / "basic"。
+
+    只在需要时调用（首次下载模型、或进入 WebUI / 解析向导）。
+    ``first_run=True`` 时用「下载量」口径提示，其余场景用「识别质量」口径。
+    ``default`` 是回车时的取值：优先沿用使用者上次选过的档位。
+    """
+    print()
+    if first_run:
+        print("  请选择要下载的模型档位（现在选，之后才开始下载）：")
+        print("    [1] standard  小模型 + 版面 VLM   约 2.1 GB  （推荐，识别质量最好）")
+        print("                  公式、表格、多栏排版更准")
+        print("    [2] basic     仅小模型            约 0.9 GB  （快、省空间）")
+        print("                  纯文本 PDF 效果接近；复杂排版 / 公式可能识别不佳")
+        print()
+        print("  提示：选 basic 可省下约 1.2 GB；以后想升级，菜单 [5] 可随时补下。")
+    else:
+        print("  解析档位（影响识别质量与速度）：")
+        print("    [1] standard  推荐。ONNX 小模型 + 版面 VLM，识别质量最好")
+        print("                  公式、表格、多栏排版更准；较慢、占显存较多")
+        print("    [2] basic     只用 ONNX 小模型。快、省显存，纯文本 PDF 效果接近")
+        print("                  无版面 VLM，复杂排版 / 公式可能识别不佳")
+    hint = "1" if default != "basic" else "2"
+    picked = ask(f"  请选择 [1/2]（回车={hint}）：", hint)
+    return {"1": "standard", "2": "basic"}.get(picked, default)
+
+
+def remembered_tier() -> str:
+    """使用者上次选定的档位；从没选过则返回按路径推出的默认值。"""
+    chosen, _partial = pkg_info.read_tier_choice()
+    if chosen is not None:
+        return chosen
+    return "standard" if env_setup.path_is_ascii() else "basic"
+
+
+def resolve_tier(tier: str, *, where: str) -> str:
+    """按档位把模型备齐；缺什么补什么，全部就绪时静默通过。
+
+    返回最终实际使用的档位（中文路径下 VLM 档会被自动降回 basic）。
+    """
+    blocker = env_setup.vlm_path_blocker()
+    if tier in env_setup.VLM_TIERS and blocker is not None:
+        print()
+        print("  [冲突] 所选档位需要版面 VLM，但它无法在非英文路径下加载：")
+        print(f"    {blocker}")
+        print()
+        print("  已自动改用 basic 档继续（纯文本 PDF 效果差不多）。")
+        print(f"  如确实要 standard：先把文件夹移到纯英文路径，再重跑{where}。")
+        tier = "basic"
+        pkg_info.write_tier_choice(tier)
+
+    if missing_modules() or not models_ready_for(tier):
+        print()
+        print(f"  所选档位（{tier}）组件还没齐，先补齐再继续。")
+        if not bootstrap.ensure_ready(tier=tier, argv=["--tier", tier], ask_if_missing=False):
+            print()
+            print("  [失败] 组件未能补齐，请检查网络后重试；")
+            print("         或改用菜单 [5] 手动补齐。")
+            pause()
+            return tier
+    return tier
 
 
 def menu() -> None:
@@ -145,8 +214,13 @@ def menu() -> None:
 def action_webui() -> None:
     port = env_setup.find_free_port(7860)
     url = f"http://127.0.0.1:{port}"
-    # 中文路径下版面 VLM 起不来，WebUI 自动退回 basic，避免用户一上来就撞墙
-    tier = "standard" if env_setup.path_is_ascii() else "basic"
+
+    tier = ask_tier(default=remembered_tier())
+    # 记下这次的选择；「本轮不问、下次直接进」就靠它
+    pkg_info.write_tier_choice(tier)
+    # 中文路径自动降级 + 档位级补齐（缺什么补什么，齐了就静默通过）
+    tier = resolve_tier(tier, where="本菜单")
+
     print()
     print(LINE)
     print("  即将启动网页界面，浏览器会自动打开：")
@@ -155,8 +229,7 @@ def action_webui() -> None:
     print("  关闭时：回到本窗口按 Ctrl+C，或直接关掉本窗口。")
     if tier == "basic":
         print()
-        print("  [注意] 包路径含非英文字符，本次自动使用 basic 档（版面 VLM 不可用）。")
-        print("         需要 standard 档请先把文件夹移到纯英文路径。")
+        print("  [注意] 本次使用 basic 档（版面 VLM 不可用）。")
     print(LINE)
     print()
     run_mineru(
@@ -211,22 +284,20 @@ def action_parse(argv: list[str] | None = None) -> None:
         return
 
     print()
-    print("  解析档位：")
-    print("    [1] standard  推荐。ONNX 小模型 + 版面 VLM，质量最好（默认）")
-    print("    [2] basic     只用 ONNX 小模型，快、省显存，适合纯文本 PDF")
-    tier = {"1": "standard", "2": "basic"}.get(ask("  请选择 [1/2]（回车=1）：", "1"), "standard")
+    tier = ask_tier(default=remembered_tier())
+    pkg_info.write_tier_choice(tier)
+    tier = resolve_tier(tier, where="本向导")
 
-    blocker = env_setup.vlm_path_blocker()
-    if tier in env_setup.VLM_TIERS and blocker is not None:
-        print()
-        print("  [冲突] 所选档位需要版面 VLM，但它无法在非英文路径下加载：")
-        print(f"    {blocker}")
-        print()
-        print("  已自动改用 basic 档继续（纯文本 PDF 效果差不多）。")
-        print("  如确实要 standard：先把文件夹移到纯英文路径，再重跑本向导。")
-        tier = "basic"
-
-    fmt = ask("  输出格式 [markdown/middle_json/zip]（回车=markdown）：", "markdown")
+    print()
+    print("  输出格式：")
+    print("    [1] markdown     单文件 .md。图片以 base64 内联在正文里（默认）")
+    print("                     体积大，适合只取文字、或整篇丢给 AI 读")
+    print("    [2] zip          推荐。得到 markdown.md + images/ 图片文件，")
+    print("                     正文用 images/xxx.jpg 相对路径引用，便于存档")
+    print("    [3] middle_json  结构化 JSON，不含图片，适合二次开发")
+    # 序号与名称都接受，避免习惯直接敲 markdown / zip 的人被静默改成默认值
+    fmt_raw = ask("  请选择 [1/2/3]（回车=1）：", "1")
+    fmt = {"1": "markdown", "2": "zip", "3": "middle_json"}.get(fmt_raw, fmt_raw)
     if fmt not in ("markdown", "middle_json", "zip"):
         fmt = "markdown"
 
@@ -358,7 +429,8 @@ def action_download_models() -> None:
     print("  basic 档需要 ONNX 小模型（约 860 MB）；")
     print("  standard 档还需要版面 VLM（约 1.24 GB）。")
     print()
-    tier = {"1": "standard", "2": "basic"}.get(ask("  要补全哪一档 [1=standard 2=basic]（回车=1）：", "1"), "standard")
+    tier = ask_tier(default=remembered_tier())
+    pkg_info.write_tier_choice(tier)
 
     missing = missing_modules()
     if missing:
@@ -368,7 +440,7 @@ def action_download_models() -> None:
             print("\n  [失败] 依赖未装全，请检查网络后重试。")
             pause()
             return
-    elif not models_ready_for(tier):
+    if not models_ready_for(tier):
         if not bootstrap.install_models(tier):
             print("\n  [失败] 模型未下载完整，请检查网络后重试。")
             pause()
@@ -387,14 +459,28 @@ def main() -> int:
 
     argv = sys.argv[1:]
     # 首启自举：缺依赖/模型就自动下载（全量包或已补齐时几乎零开销直接放行）。
-    # 中文路径下 standard 档本来就不可用，此时只下 basic，省掉 1.2 GB。
-    tier = "standard" if env_setup.path_is_ascii() else "basic"
-    if not bootstrap.ensure_ready(tier=tier, argv=argv):
+    # 档位取「使用者上次选过的」；从没选过才在下载前问一次，且只问这一次。
+    # 拖文件直接解析（argv 传了路径）时无人交互，不询问，直接用默认/记住的档位：
+    # 中文路径下 standard 本来就不可用，此时只下 basic，省掉 1.2 GB。
+    headless = bool(argv) and all(not a.startswith("-") for a in argv)
+    default_tier = "standard" if env_setup.path_is_ascii() else "basic"
+
+    def _choose() -> str:
+        picked = ask_tier(first_run=True, default=default_tier)
+        pkg_info.write_tier_choice(picked)
+        return picked
+
+    if not bootstrap.ensure_ready(
+        tier=default_tier,
+        argv=argv,
+        tier_chooser=_choose,
+        ask_if_missing=not headless,
+    ):
         pause("  按回车键退出…")
         return 1
 
     # 支持「把文件拖到 启动MinerU.bat 上」直接解析
-    if argv and all(not a.startswith("-") for a in argv):
+    if headless:
         banner()
         action_parse(argv)
         return 0

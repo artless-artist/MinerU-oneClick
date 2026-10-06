@@ -17,6 +17,7 @@ import importlib
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import env_setup
@@ -120,17 +121,50 @@ def install_models(tier: str = "standard") -> bool:
 # --------------------------------------------------------------------------
 # 总入口
 # --------------------------------------------------------------------------
-def ensure_ready(tier: str = "standard", argv: list[str] | None = None) -> bool:
-    """检查运行环境，缺什么补什么。返回是否可以继续。"""
+def ensure_ready(
+    tier: str = "standard",
+    argv: list[str] | None = None,
+    *,
+    tier_chooser: Callable[[], str] | None = None,
+    ask_if_missing: bool = True,
+) -> bool:
+    """检查运行环境，缺什么补什么。返回是否可以继续。
+
+    行为（按优先级）：
+
+    1. 使用者**已选定过档位**（``data/models/.tier_choice``）：直接按该档位
+       检查、缺什么补什么，**不再询问**。缺件且补不上时只给一次提示。
+    2. **从没选过**、且当前档位确实缺件：调用 ``tier_chooser`` 让使用者选，
+       然后按选择补齐。选择会被记住，以后启动不再重复问。
+    3. 一切齐备（全量包 / 已补齐）：零开销直接放行，一句不问。
+
+    ``ask_if_missing=False`` 用于无人交互的场景（拖文件直接解析），此时不询问。
+    """
     if skip_requested(argv):
         return True
 
     missing = pkg_info.missing_modules()
     small, vlm = pkg_info.models_ready()
-    need_models = not (small and vlm) if tier == "standard" else not small
 
-    if not missing and not need_models:
-        return True  # 常用路径：全量包/已补齐，直接放行
+    # 已表达过偏好：以它为准，不再拿「模型齐不齐」去打扰使用者。
+    chosen, was_partial = pkg_info.read_tier_choice()
+    if chosen is not None:
+        tier = chosen
+
+    ready_now = not missing and pkg_info.models_ready_for(tier)
+    if ready_now:
+        return True  # 常用路径：全量包 / 已补齐 / basic 用户，零开销跳过
+
+    # 从没选过 + 真的缺件 -> 问一次，并记住。必须在打印环境报告、开始下载之前。
+    # 说明：这里用「当前档位够不够用」（models_ready_for）而不是「模型全不全」，
+    # 这样 basic 用户（小模型在、VLM 故意不装）不会再被反复询问。
+    if chosen is None and tier_chooser is not None and ask_if_missing:
+        selected = tier_chooser()
+        if selected in ("standard", "basic"):
+            tier = selected
+        pkg_info.write_tier_choice(tier)
+
+    need_models = not pkg_info.models_ready_for(tier)
 
     print()
     print(LINE)
@@ -143,9 +177,11 @@ def ensure_ready(tier: str = "standard", argv: list[str] | None = None) -> bool:
     else:
         print("  Python 依赖 : 就绪")
     print(f"  模型权重 : 小模型 {'就绪' if small else '缺失'} / 版面 VLM {'就绪' if vlm else '缺失'}")
+    print(f"  本次档位 : {tier}" + ("" if need_models else "（已就绪，无需下载）"))
     print(LINE)
-    print("  接下来会自动下载缺失部分，全程需要联网。")
-    print("  想跳过请按 Ctrl+C，或用环境变量 MINERU_SKIP_SETUP=1 启动。")
+    if need_models:
+        print("  接下来会自动下载缺失部分，全程需要联网。")
+        print("  想跳过请按 Ctrl+C，或用环境变量 MINERU_SKIP_SETUP=1 启动。")
     print()
 
     if missing and not install_deps():
