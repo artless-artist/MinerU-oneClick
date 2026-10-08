@@ -120,7 +120,8 @@ def banner() -> None:
     print(f"  Python 依赖 : {deps_state}")
     print(f"  模型状态 : 小模型 {status_small} / 版面 VLM {status_vlm}   (共 {human(total)})")
     if chosen is not None:
-        print(f"  解析档位 : {chosen}（回车默认沿用；进入功能时可临时改）")
+        print(f"  档位偏好 : {chosen}（决定补下哪些模型、命令行向导的默认值；")
+        print("               WebUI 内可随时切换档位，不受此项限制）")
     # 只有「当前档位真的不够用」才提示补齐 —— basic 用户不用看 VLM 缺失的告警
     active = chosen or ("standard" if env_setup.path_is_ascii() else "basic")
     if deps_bad or not models_ready_for(active):
@@ -169,6 +170,26 @@ def remembered_tier() -> str:
     return "standard" if env_setup.path_is_ascii() else "basic"
 
 
+def webui_server_tier() -> str:
+    """WebUI 该对外广告到哪一档 —— 由「本机实际装了什么」决定，而不是去问使用者。
+
+    为什么这里不能问：WebUI 界面里本身就有一个档位滑块，它的候选项来自
+    服务端广告出来的能力（`mineru-kit webui --api-server-tier`，
+    上游 `TIERS_BY_SERVER_TIER`）：
+
+        --api-server-tier standard -> flash / basic / standard / advanced
+        --api-server-tier basic    -> flash / basic
+
+    启动前再问一遍，除了多余，还会把界面里的选项从 4 个砍成 2 个 ——
+    明明装全了模型的人，反而在界面里找不到 standard / advanced。
+    所以这里只判断「最高能跑到哪」，把选择权交回界面。
+    """
+    small, vlm = models_ready()
+    if small and vlm and env_setup.path_is_ascii():
+        return "standard"
+    return "basic"
+
+
 def resolve_tier(tier: str, *, where: str) -> str:
     """按档位把模型备齐；缺什么补什么，全部就绪时静默通过。
 
@@ -215,11 +236,17 @@ def action_webui() -> None:
     port = env_setup.find_free_port(7860)
     url = f"http://127.0.0.1:{port}"
 
-    tier = ask_tier(default=remembered_tier())
-    # 记下这次的选择；「本轮不问、下次直接进」就靠它
-    pkg_info.write_tier_choice(tier)
-    # 中文路径自动降级 + 档位级补齐（缺什么补什么，齐了就静默通过）
-    tier = resolve_tier(tier, where="本菜单")
+    # 不再询问档位：界面里本来就有档位选择器，这里只把「本机能跑的最高档」透传过去。
+    tier = webui_server_tier()
+    if missing_modules() or not models_ready_for(tier):
+        print()
+        print(f"  补齐 {tier} 档所需组件…")
+        if not bootstrap.ensure_ready(tier=tier, argv=["--tier", tier], ask_if_missing=False):
+            print()
+            print("  [失败] 组件未能补齐，请检查网络后重试；")
+            print("         或改用菜单 [5] 手动补齐。")
+            pause()
+            return
 
     print()
     print(LINE)
@@ -227,9 +254,16 @@ def action_webui() -> None:
     print(f"      {url}")
     print("  首次解析需要加载模型，可能要等几十秒。")
     print("  关闭时：回到本窗口按 Ctrl+C，或直接关掉本窗口。")
-    if tier == "basic":
-        print()
-        print("  [注意] 本次使用 basic 档（版面 VLM 不可用）。")
+    if tier == "standard":
+        print("  档位在界面内切换：flash / basic / standard / advanced")
+    else:
+        print("  档位在界面内切换：flash / basic")
+        if not env_setup.path_is_ascii():
+            print("  （本包路径含非英文字符，版面 VLM 无法加载，故只开放这两档；")
+            print("    移到纯英文路径后即可解锁 standard / advanced）")
+        else:
+            print("  （本机只装了 ONNX 小模型；菜单 [5] 可补下版面 VLM，")
+            print("    之后就能在界面里选 standard / advanced）")
     print(LINE)
     print()
     run_mineru(

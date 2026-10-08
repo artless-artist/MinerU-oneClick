@@ -6,18 +6,17 @@ MinerU: 把 PDF / 图片 / Word / PPT / Excel 等文档转成结构化 Markdown 
 
 本整合包具体特性如下：
 
-
-* **便携版**：不自带安装程序，双击 `启动MinerU.bat` 就能用；整包可搬移，自带环境无须配置；不写注册表，删除文件夹即可卸载
-* **自动配置**： 首次启动会自动下载所需环境与模型（优先使用国内的镜像源以加速下载），如果检查到已经就绪就跳过，不会重复下载（如果需要在无网环境下使用，可以先在有网电脑上启动一次，待下载就绪后将整个整合包的文件夹复制到无网电脑上）
+- **便携版**：不自带安装程序，双击 `启动MinerU.bat` 就能用；整包可搬移，自带环境无须配置；不写注册表，删除文件夹即可卸载
+- **自动配置**： 首次启动会自动下载所需环境与模型（优先使用国内的镜像源以加速下载），如果检查到已经就绪就跳过，不会重复下载（如果需要在无网环境下使用，可以先在有网电脑上启动一次，待下载就绪后将整个整合包的文件夹复制到无网电脑上）
 
 ---
 
 ## 快速开始
 
-1. 下载并解压本包到任意目录（**路径使用纯英文，不要包含中文字符**，因为项目中的 VLM 依赖 llama.cpp 的 Windows 原生库，无法在中文路径下使用，路径含中文时本包不会使用VLM解析版面，虽然仍能正常工作，且对于纯文本 PDF 效果差不多，但要用完整质量就请放英文路径
-2. 双击 **`启动MinerU.bat`**（或 `Start-MinerU.bat`，两者等价）
-3. 首次启动若缺组件会自动下载，等它跑完
-4. 弹出菜单后输入1再回车，打开对应网址即可使用
+1. 下载并解压本包到任意目录（**路径使用纯英文，不要包含中文字符**，因为项目中的 VLM 依赖 llama.cpp 的 Windows 原生库，无法在中文路径下使用，路径含中文时本包不会使用VLM解析版面，虽然仍能正常工作，且对于纯文本 PDF 效果差不多，但要用完整质量就请放英文路径）
+2. 双击 **`启动MinerU.bat`**（或 `Start-MinerU.bat`，两者等价，只是为了防止某些终端对中文支持不好）
+3. 首次启动若缺组件会自动下载，需要选择一下模式（standard模式会下载完全的包体，而如果电脑性能不足，可以选择basic模式，只会下载较小的模型），等它跑完
+4. 弹出菜单后输入1再回车，打开对应网址即可使用；或者选择2，在命令行模型下给出文件夹路径一次解析整个文件夹内的所有文档
 
 ```
   [1] 打开网页界面 (WebUI)      ← 推荐，拖拽文件即可解析
@@ -28,10 +27,9 @@ MinerU: 把 PDF / 图片 / Word / PPT / Excel 等文档转成结构化 Markdown 
   [0] 退出
 ```
 
-也可以直接把 PDF 拖到 `启动MinerU.bat` 上，跳过菜单直接解析。
+也可以直接把 PDF 拖到 `启动MinerU.bat` 上，跳过菜单直接解析
 
 ---
-
 
 ## 目录结构
 
@@ -55,6 +53,10 @@ MinerU/
 ├─ scripts/
 │  └─ bootstrap_python.ps1   # 步骤 0：下载便携 CPython（纯 ASCII，只输出英文）
 │
+├─ skills/
+│  └─ mineru-portable/       # Agent Skill（已适配本包，见「在 AI Agent 中使用」）
+│     └─ SKILL.md
+│
 ├─ runtime/python/           # 便携解释器（首启自动下载，不入库）
 ├─ data/                     # 全部可写数据（模型/日志/临时/缓存，不入库）
 │  └─ models/                #   模型权重（首启自动下载，不入库）
@@ -65,7 +67,7 @@ MinerU/
 
 ## 高级用法
 
-包内已经为你准备好命令外壳（`app\bin\` 优先于 `Scripts\`，保证整包搬移后仍可用）。
+包内已经为你准备好命令外壳（`app\bin\` 优先于 `Scripts\`，保证整包搬移后仍可用）。  
 从菜单 **[3] 打开 MinerU 命令行** 进入交互式 shell 后：
 
 ```bat
@@ -90,6 +92,21 @@ runtime\python\python.exe app\cli.py mineru-kit parse 文档.pdf -o output --tie
 
 ---
 
+## 在 AI Agent 中使用（可选）
+
+如果希望完全由AI代劳，本包自带一个**已适配便携版的 Agent Skill**，放在  
+`skills\mineru-portable\SKILL.md`。直接告诉AI去安装 `skills\mineru-portable` 的 skills 即可，装好之后，直接对 Agent 说“帮我读一下这份 PDF 讲了什么”，它就自己调包内命令、把结果读出来回答你。
+
+这个 skill 是 MinerU 官方 skill 的便携适配版，主要差异：
+
+- 调用方式改成走本包（`app\bin\*.bat` 或 `runtime\python\python.exe app\cli.py`），不假定 PATH 里有 `mineru`
+- 去掉安装/升级步骤（本包免安装），并说明模型档位、包路径需为纯英文才能用 VLM 档等本包特有事项
+- 注明**有状态文档库（doclib）路线当前不可用**，主力走无状态的 `mineru-kit parse`（详见 skill 内的说明）
+
+它只是一份说明文档，**不含任何脚本、不会安装或下载东西、也不修改 MinerU 源码**；所有命令都只在包内运行。
+
+---
+
 ## 如何自己构建
 
 1. 从 [PyPI](https://pypi.org/project/mineru/) 或 [官方仓库](https://github.com/opendatalab/MinerU) 取 `mineru-4.0.10-py3-none-any.whl`
@@ -103,12 +120,10 @@ runtime\python\python.exe app\cli.py mineru-kit parse 文档.pdf -o output --tie
 ## 许可证与致谢
 
 - **MinerU**  [MinerU Open Source License](https://github.com/opendatalab/MinerU/blob/master/LICENSE.md) 基于 Apache 2.0 开源，并带有如下附加条款：
-
-	- 商业使用：MAU ≤ 1 亿 **且** 月收入 ≤ 2000 万美元时免费；
-	- **署名义务**：若基于 MinerU 向第三方提供在线服务，必须在界面或公开文档显著位置标明使用了 MinerU。
-
+  - 商业使用：MAU ≤ 1 亿 **且** 月收入 ≤ 2000 万美元时免费；
+  - **署名义务**：若基于 MinerU 向第三方提供在线服务，必须在界面或公开文档显著位置标明使用了 MinerU。
 - **便携 CPython** 由 [astral-sh/python-build-standalone](https://github.com/astral-sh/python-build-standalone) 提供，遵循 PSF Python 许可证。
 - **模型权重**来自 ModelScope：
   - `OpenDataLab/MinerU-4_models_onnx`（ONNX：版面/OCR/公式/表格）
   - `jinzhenj/MinerU2.5-Pro-2605-1.2B-GGUF`（版面 VLM，GGUF）
-- 本便携外壳（`app/` + `scripts/`）不修改 MinerU 任何源码。
+- 本整合包（`app/` + `scripts/`）不修改 MinerU 任何源码。

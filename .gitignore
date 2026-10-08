@@ -30,6 +30,15 @@
 /_tmp/
 /_cache/
 
+# --- 文档库（doclib）运行期状态 --------------------------------------------
+#     SQLite 文档库 + WAL + 端点信息（含 PID / server_id），全属本机运行时产物，
+#     换台机器就没有意义，且可能泄露本机路径，一律不入库。
+/data/doclib/
+/data/doclib.db
+/data/doclib.db-wal
+/data/doclib.db-shm
+/data/doclib.endpoint.json
+
 # --- 可再生的编译产物（解释器用到时会自己重建）------------------------------
 #     打包时已从这里清出 230 MB（11714 个文件）。
 __pycache__/
