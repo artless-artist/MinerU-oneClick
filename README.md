@@ -23,7 +23,7 @@ MinerU: 把 PDF / 图片 / Word / PPT / Excel 等文档转成结构化 Markdown 
 
 ## 快速开始
 
-1. 下载并解压本包到任意目录（**路径使用纯英文，不要包含中文字符**，）
+1. 下载并解压本包到任意目录（**路径使用纯英文，不要包含中文字符**）
 2. 双击 **`启动MinerU.bat`**（或 `Start-MinerU.bat`，两者等价，只是为了防止某些终端对中文支持不好）
 3. 首次启动若缺组件会自动下载，需要选择一下模式（standard模式会下载完全的包体，而如果电脑性能不足，可以选择basic模式，只会下载较小的模型），等它跑完
 4. 弹出菜单后输入1再回车，打开对应网址即可使用；或者选择2，在命令行模型下给出文件夹路径一次解析整个文件夹内的所有文档
@@ -34,6 +34,7 @@ MinerU: 把 PDF / 图片 / Word / PPT / Excel 等文档转成结构化 Markdown 
   [3] 打开 MinerU 命令行
   [4] 环境自检 / 模型校验
   [5] 检查并补齐缺失组件（依赖 + 模型）
+  [6] 升级 MinerU（只换程序，不动模型）
   [0] 退出
 ```
 
@@ -53,10 +54,11 @@ MinerU/
 ├─ requirements.lock.txt     # 112 个依赖的版本锁定表，供首启精确复现
 │
 ├─ app/                      # 启动器与自检（纯 Python，可读可改）
-│  ├─ launcher.py            #   交互菜单、横幅、自检 [4]、补齐 [5]
+│  ├─ launcher.py            #   交互菜单、横幅、自检 [4]、补齐 [5]、升级 [6]
 │  ├─ bootstrap.py           #   首启自举：装依赖 + 下模型
 │  ├─ pkg_info.py            #   所需环境与模型的检查结果
 │  ├─ env_setup.py           #   环境隔离：所有可写路径重定向进包内
+│  ├─ uikit.py               #   控制台输出保险：按窗口宽度安全折行（见文件头注释）
 │  ├─ cli.py                 #   命令行转发壳
 │  └─ bin/*.bat              #   mineru / mineru-kit / mineru-api 等命令外壳
 │
@@ -99,6 +101,38 @@ mineru-kit --help
 ```bat
 runtime\python\python.exe app\cli.py mineru-kit parse 文档.pdf -o output --tier basic
 ```
+
+---
+
+## 升级 MinerU
+
+上游发了新版本，**不用重新下载整个整合包** —— 模型（约 3 GB）、`output` 里的结果、你的档位设置都不受影响，只换程序部分。
+
+在菜单里选 **`[6] 升级 MinerU`**：它会列出可安装的版本 → 确认后走国内镜像升级 → 自动做三件收尾：
+
+1. **冒烟测试**：把 7 个命令入口逐个 import 一遍，撞出「新版改了模块结构」这类 pip 查不出的问题；
+2. **同步自写层**：改掉 `app\pkg_info.py` 里的 `MINERU_VERSION`，并按当前环境重新生成 `requirements.lock.txt`；
+3. **校验模型清单**：问新版「你期望哪些模型仓库和权重文件」，和本包登记的清单比对，变了会告诉你。
+
+升级后横幅与**窗口标题栏**都会自动显示新版本号（运行时读已安装包的 `dist-info`，不依赖任何文件被改写）。
+
+若冒烟测试没过，菜单里可以直接回退到旧版本。
+
+手动升级（等价做法）：
+
+```bat
+runtime\python\python.exe -m pip install --upgrade mineru==4.0.12 -i https://mirrors.aliyun.com/pypi/simple
+```
+
+> 镜像换成 `https://pypi.tuna.tsinghua.edu.cn/simple` 也行，但清华源偶尔对 mineru 的 wheel 文件返回 403，遇到就换阿里云。
+
+**为什么升级后还得动自写层？** `app\pkg_info.py` 的 `MINERU_VERSION` 和 `requirements.lock.txt`
+是照当前版本写死的：`bootstrap` 补齐依赖时**第一个计划就是 `-r requirements.lock.txt`**，
+不改这两处，下次菜单 `[5]` 补依赖会把刚升上去的版本**降级回旧版**。菜单 `[6]` 会自动处理，手动升级请自己改。
+
+**什么情况不能只换程序**：新版要求更高的 Python、改了命令名或档位名 —— 那要改 `app\` 里的几个常量
+（`env_setup.VLM_TIERS`、`cli.py` 的入口表、`launcher.py` 的档位文案）；只有**换了模型仓库**才需要重下模型。
+升级后跑一次菜单 `[4]` 环境自检即可确认。
 
 ---
 

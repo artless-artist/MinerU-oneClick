@@ -1,6 +1,6 @@
 @echo off
 rem ===========================================================================
-rem  MinerU 4.0.10 - Portable one-click launcher
+rem  MinerU - Portable one-click launcher
 rem
 rem  This file is intentionally PURE ASCII.  cmd.exe parses .bat files using the
 rem  OEM code page (936 / GBK on zh-CN Windows); UTF-8 multi-byte sequences can
@@ -16,7 +16,8 @@ rem ===========================================================================
 chcp 65001 >nul 2>&1
 setlocal
 cd /d "%~dp0"
-title MinerU 4.0.10 Portable
+rem  the real version is appended to the title by app\launcher.py at startup
+title MinerU Portable
 
 rem --- keep the bundled interpreter insulated from the host machine ---
 set "PYTHONUTF8=1"

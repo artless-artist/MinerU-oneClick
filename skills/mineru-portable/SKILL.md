@@ -12,7 +12,7 @@ description: 用本机已解压的 MinerU 便携整合包解析本地文档—�
 
 **KIT_ROOT: `<KIT>`**
 
-本文件是官方 [`skills/mineru/SKILL.md`](https://github.com/opendatalab/MinerU/tree/master/skills/mineru) 的**便携包适配版**，对应 **MinerU 4.0.10**。
+本文件是官方 [`skills/mineru/SKILL.md`](https://github.com/opendatalab/MinerU/tree/master/skills/mineru) 的**便携包适配版**，对应 **MinerU 4.0.10**（整合包可用菜单 `[6]` 自行升级到更新的上游版本；本文件描述的调用形式、档位名与模型布局在 4.x 内保持不变）。
 
 与官方版的区别只有三处，其余规则一致：
 
@@ -214,6 +214,7 @@ RuntimeError: No mapping for the Unicode character exists in the target multi-by
 - **下载是按档位精确的**：`--tier basic` 只会下 ONNX 小模型，**不会**顺带下版面 VLM（上游依据 `resolved_tier` 决定是否追加 VLM 仓库）。只想要 basic 的用户可以放心跑补齐。
 - 下载需要联网，模型来自 ModelScope（包内已默认国内源）。
 - 用户也可以双击 `启动MinerU.bat` 用菜单 `[5]` 交互式补齐——那不属于 Agent 的活。
+- **上游版本升级走菜单 `[6]`**（它升完会自动同步 `pkg_info.MINERU_VERSION` 与 `requirements.lock.txt`）。别绕过菜单自己 `pip install --upgrade mineru`：不改那两处，下次补齐依赖会把版本降级回去。同理，这也**不属于 Agent 的活**——升级要联网、要确认，交给用户点。
 - 整合包的档位偏好记在 `<KIT>/data/models/.tier_choice`（一行 `basic` 或 `standard`）。需要知道"用户平时用哪档"时读它；它**不等于**本次该用的档位，仍按 §5.2 的规则判断。
 
 ## 7. 隐私规则
@@ -264,6 +265,16 @@ MinerU 是隐私优先的。
 | 显存/内存不足、进程被杀 | OOM | 降档（`standard`→`basic`）、用 `-p` 缩小页范围、分页多次解析 |
 | `server_not_running` | 走了 doclib 路线 | 改用 `mineru-kit parse`（§8） |
 | 输出目录里没有产物但退出码 0 | 大概是没解析到内容 | 用 `-v` 重跑一次看日志，确认输入路径与格式 |
+| WebUI 里 `[Errno 2] No such file or directory: '...\downloads\.bundle-xxxx\<名字>_markdown.zip'` | **Windows MAX_PATH 260 字符超限**（下载 zip 会经 `.bundle-*` 临时目录中转，比 `.html` 多 25 字符），长标题 PDF 必中 | 见下方说明；**不要**当成解析失败去重试 |
+
+**关于上面那条长路径报错**（`mineru/kit/gradio/artifacts.py:_write_archive`）：
+
+- 触发条件是**路径总长度**，不是文档问题。上界实测很硬：**259 字符可写、260 字符必失败**。
+- 长度是几段叠加的：安装路径前缀 + 任务目录名（= 论文标题 sanitize 后最多 120 **字节** + `_` + 12 位随机） + `downloads` + `.bundle-xxxxxxxx` + 文件名。
+- 同一任务的 `downloads/<名字>.html` 通常还能下（它不经 `.bundle-*` 中转）；只有 `markdown/json/latex` 这类 zip 会失败。
+- 加 `\\?\` 扩展前缀**没用**（CPython 的 `open()`/`zipfile` 走 CRT，实测仍报 WinError 3）。
+- 处理办法（按代价排序）：① 别点下载按钮，直接去 `output/gradio/<任务目录>/` 取 `markdown.md` + `images/`（早已生成好）；② 启用长路径（注册表 `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled=1`，需管理员 + 重启）；③ 把整合包移到更短路径。
+- WebUI 的 `--output-dir` **界面里改不了**，只能由启动参数决定。
 
 重试规则：
 
@@ -284,7 +295,7 @@ MinerU 是隐私优先的。
 ## 11. 红线
 
 - **不要修改 MinerU 官方源码**：`<KIT>/runtime/python/Lib/site-packages/mineru/**` 与 `.../docvortex/**` 一律只读。本整合包的约定是「官方源码零改动」，所有定制都在 `<KIT>/app/` 这层自写封装里。
-- **不要往包内运行时 pip 安装任何东西**（会破坏可搬运性）。缺依赖让用户走菜单 `[5]`。
+- **不要往包内运行时 pip 安装任何东西**（会破坏可搬运性）。缺依赖让用户走菜单 `[5]`，升级上游版本走菜单 `[6]`。
 - 不要用 `<KIT>/runtime/python/Scripts/*.exe`。
 - 未经同意不要上传文档（`--remote`）。
 - 不要删用户的源文件；`-o` 只写输出目录。

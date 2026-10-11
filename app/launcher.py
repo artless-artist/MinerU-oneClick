@@ -1,10 +1,11 @@
-"""MinerU 4.0.10 便携版 —— 一键启动菜单。
+"""MinerU 便携版 —— 一键启动菜单。
 
 所有中文提示都在这里打印（启动用的 .bat 保持纯 ASCII，避免 cmd.exe 按
 GBK 解析 UTF-8 时吞掉换行导致的诡异报错）。
 
 「缺什么、齐了没」的判断统一取自 pkg_info，首启自动补齐交给 bootstrap，
-本文件只负责交互与展示。
+本文件只负责交互与展示。当前 mineru 版本不写死在这里 —— 一律问
+importlib.metadata（升级后菜单 [6] 会自动改掉 pkg_info 里的记录值）。
 """
 
 from __future__ import annotations
@@ -100,6 +101,33 @@ def strip_quotes(value: str) -> str:
 
 
 # --------------------------------------------------------------------------
+# 版本号
+# --------------------------------------------------------------------------
+def current_version() -> str:
+    """已安装的 mineru 版本。
+
+    运行时问 importlib.metadata（即 site-packages 里的 dist-info），所以**升级后
+    自动跟随**，不依赖任何文件被改写；`MINERU_VERSION` 只在元数据读不到时兜底。
+    """
+    return pkg_info.mineru_version() or pkg_info.MINERU_VERSION
+
+
+def set_console_title() -> None:
+    """把控制台窗口标题栏同步成实际版本号。
+
+    启动的 .bat 必须保持纯 ASCII（cmd 按 OEM 代码页解析 bat，中文会出错），
+    所以那里只能写死的 `title MinerU Portable`；真正的版本号由这里补上。
+    非 Windows，或 stdout 被重定向（无控制台）时静默跳过，不影响任何功能。
+    """
+    try:
+        import ctypes
+
+        ctypes.windll.kernel32.SetConsoleTitleW(f"MinerU {current_version()} Portable")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# --------------------------------------------------------------------------
 # 横幅
 # --------------------------------------------------------------------------
 def banner() -> None:
@@ -107,7 +135,10 @@ def banner() -> None:
     chosen, _partial = pkg_info.read_tier_choice()
     print()
     print(LINE)
-    print("  MinerU 4.0.10  便携版   ——  PDF / 图片 / Office 文档  →  Markdown")
+    ver = current_version()
+    # 标题刻意写短：控制台把 「——」「→」 这类「歧义宽度」字符按全角渲染，比 uikit
+    # 的宽度表算出来的更宽；标题一长，窄窗口里就会被控制台自己折断成半行（实测 67 列即折）。
+    print(f"  MinerU {ver}  便携版   PDF / 图片 / Office → Markdown")
     print(LINE)
     print(f"  程序目录 : {ROOT}")
     print(f"  模型目录 : {MODELS_DIR}")
@@ -225,6 +256,7 @@ def menu() -> None:
     print("  [3] 打开 MinerU 命令行")
     print("  [4] 环境自检 / 模型校验")
     print("  [5] 检查并补齐缺失组件（依赖 + 模型）")
+    print("  [6] 升级 MinerU（只换程序，不动模型）")
     print("  [0] 退出")
     print()
 
@@ -485,11 +517,129 @@ def action_download_models() -> None:
 
 
 # --------------------------------------------------------------------------
+# [6] 升级 MinerU
+# --------------------------------------------------------------------------
+def action_upgrade() -> None:
+    print()
+    print(LINE)
+    print("  升级 MinerU")
+    print(LINE)
+    print("  只替换包内的上游程序文件（几十 MB）。模型权重、output 里的结果、")
+    print("  档位设置都不受影响；升级后会自动同步自写层的版本号与依赖锁定表。")
+    print()
+
+    current = bootstrap.current_version() or "(读不到)"
+    print(f"  当前版本 : {current}")
+    print("  正在查询可安装的版本…")
+    latest, versions = bootstrap.available_versions()
+    if latest is None:
+        print("  [失败] 查不到版本列表（多半是网络问题）。稍后可重试，或手动执行：")
+        print(f'      "{PYTHON_EXE}" -m pip install --upgrade mineru==<版本>')
+        print("      -i https://mirrors.aliyun.com/pypi/simple")
+        pause()
+        return
+    print(f"  最新版本 : {latest}")
+    if versions:
+        shown = "、".join(versions[:12])
+        print("  可选版本 : " + shown + ("…" if len(versions) > 12 else ""))
+    print()
+
+    raw = ask(f"  目标版本（回车={latest}；q=取消）：", latest)
+    target = raw.strip().lstrip("vV")
+    if target.lower() in ("q", "quit", "exit"):
+        print("  [取消] 未做任何改动。")
+        pause()
+        return
+    if not bootstrap.is_version_like(target):
+        print(f"  [取消] 这不像版本号：{target}")
+        pause()
+        return
+    if target == bootstrap.current_version():
+        print(f"  当前已经是 {target}，无需升级。")
+        pause()
+        return
+    if versions and target not in versions:
+        print(f"  [警告] 版本列表里没有 {target}，可能是拼错了。")
+        if ask("  仍要继续？(y/N)：", "n").lower() not in ("y", "yes"):
+            print("  [取消] 未做任何改动。")
+            pause()
+            return
+    if ask(f"  确认升级到 {target}？(y/N)：", "n").lower() not in ("y", "yes"):
+        print("  [取消] 未做任何改动。")
+        pause()
+        return
+
+    print()
+    print("  需要联网（pip 走国内镜像）。升级期间请勿关闭本窗口。")
+    if not bootstrap.upgrade_mineru(target):
+        print()
+        print("  [失败] 升级未完成，环境仍是原来的版本。请检查网络后重试；")
+        print("         若提示权限不足或被占用，请先关掉其他正在运行的 MinerU 窗口。")
+        pause()
+        return
+
+    print()
+    print(LINE)
+    print("  升级完成，开始复核")
+    print(LINE)
+
+    print("[1] 冒烟测试：逐个导入命令入口（首次可能要十几秒）…")
+    ok, notes = bootstrap.smoke_test()
+    for note in notes:
+        print("      " + note)
+    if not ok:
+        print()
+        print("  [警告] 冒烟测试未通过 —— 新版可能改了模块结构，或依赖没装全。")
+        print("         回退办法：菜单 [6] 里再装回旧版本，或执行")
+        print(f'                   "{PYTHON_EXE}" -m pip install mineru=={current}')
+        if current not in ("(读不到)", "(未安装)") and ask(
+            f"         现在就自动回退到 {current}？(y/N)：", "n"
+        ).lower() in ("y", "yes"):
+            if bootstrap.upgrade_mineru(current):
+                print("         [完成] 已回退到 " + current)
+            else:
+                print("         [失败] 回退未成功，请手动处理。")
+        pause()
+        return
+
+    print("[2] 同步自写层（版本号 + 依赖锁定表）")
+    for note in bootstrap.sync_self_layer(target):
+        print("      " + note)
+
+    print("[3] 校验模型清单是否跟上新版")
+    same, issues = bootstrap.check_model_catalog()
+    for note in issues:
+        print("      " + note)
+    if not same:
+        print()
+        print("  [注意] 新版换了模型，想用满全部档位得重下对应的那部分：")
+        print("         菜单 [5] 选 standard 会自动补下；若清单本身也过期，")
+        print("         需要更新 pkg_info.py 里的模型清单（来找我改）。")
+
+    print()
+    print(LINE)
+    print(f"  已升级到 mineru {bootstrap.current_version()}")
+    print("  建议接着跑一次菜单 [4] 环境自检，确认依赖与模型都正常。")
+    print(LINE)
+    pause()
+
+
+# --------------------------------------------------------------------------
 # 入口
 # --------------------------------------------------------------------------
 def main() -> int:
     env_setup.apply_env()
     env_setup.apply_safe_stdio()
+
+    # 本进程所有 print 走安全折行：避免「某一行正好占满窗口列数」时控制台
+    # 多插一个空行、导致整屏漂一格（详见 uikit 模块头注释）。
+    # 窗口 ≥72 列时输出与改造前逐字节相同。
+    import uikit
+
+    uikit.install()
+
+    # 窗口标题栏写实际版本（bat 里那行 title 只能是不带版本的纯 ASCII 兜底）。
+    set_console_title()
 
     argv = sys.argv[1:]
     # 首启自举：缺依赖/模型就自动下载（全量包或已补齐时几乎零开销直接放行）。
@@ -523,7 +673,7 @@ def main() -> int:
         os.system("cls")
         banner()
         menu()
-        choice = ask("  请选择 [0-5]（回车=1）：", "1")
+        choice = ask("  请选择 [0-6]（回车=1）：", "1")
         os.system("cls")
 
         if choice in ("1", "webui"):
@@ -540,6 +690,9 @@ def main() -> int:
         elif choice in ("5", "models", "download"):
             banner()
             action_download_models()
+        elif choice in ("6", "upgrade", "update"):
+            banner()
+            action_upgrade()
         elif choice in ("0", "q", "quit", "exit"):
             print("\n  已退出。\n")
             return 0
