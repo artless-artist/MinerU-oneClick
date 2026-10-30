@@ -89,8 +89,8 @@ mineru-kit parse 文档.pdf -o D:\out --tier standard -f markdown
 :: 核对模型状态
 mineru-kit models verify --tier standard
 
-:: 起 WebUI，指定端口
-mineru-kit webui --server-name 127.0.0.1 --server-port 7860 --api-server-tier standard
+:: 起 WebUI，指定端口（`--tier` 是服务端档位上限：basic 只放两档，advanced 放全部四档）
+mineru-kit webui --server-name 127.0.0.1 --server-port 7860 --tier advanced
 
 :: 查看完整帮助
 mineru-kit --help
@@ -121,7 +121,7 @@ runtime\python\python.exe app\cli.py mineru-kit parse 文档.pdf -o output --tie
 手动升级（等价做法）：
 
 ```bat
-runtime\python\python.exe -m pip install --upgrade mineru==4.0.12 -i https://mirrors.aliyun.com/pypi/simple
+runtime\python\python.exe -m pip install --upgrade mineru -i https://mirrors.aliyun.com/pypi/simple
 ```
 
 > 镜像换成 `https://pypi.tuna.tsinghua.edu.cn/simple` 也行，但清华源偶尔对 mineru 的 wheel 文件返回 403，遇到就换阿里云。
@@ -133,6 +133,11 @@ runtime\python\python.exe -m pip install --upgrade mineru==4.0.12 -i https://mir
 **什么情况不能只换程序**：新版要求更高的 Python、改了命令名或档位名 —— 那要改 `app\` 里的几个常量
 （`env_setup.VLM_TIERS`、`cli.py` 的入口表、`launcher.py` 的档位文案）；只有**换了模型仓库**才需要重下模型。
 升级后跑一次菜单 `[4]` 环境自检即可确认。
+
+> **4.1 起已经踩过的一个坑**：上游把 WebUI 的档位上限参数从 `--api-server-tier` 改名成 `--tier`，
+> 并且把 `advanced` 拆成了独立一档（旧的 `standard` 放四档，新的 `standard` 只放三档）。
+> 启动器现在**不写死**这个参数：选项名从上游 webui 命令的声明里探，取值从上游档位映射表反查，
+> 探不到就不传（退回上游默认）。所以这类改名以后不用再改代码。
 
 ---
 

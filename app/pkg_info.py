@@ -50,7 +50,7 @@ REQUIRED_MODULES: tuple[tuple[str, str], ...] = (
     ("docvortex", "文档解析内核"),
 )
 
-MINERU_VERSION = "4.0.10"
+MINERU_VERSION = "4.1.3"
 LOCK_FILE = ROOT / "requirements.lock.txt"
 PYTHON_EXE = PYTHON_DIR / "python.exe"
 LLAMA_SERVER = PYTHON_DIR / "Lib" / "site-packages" / "mineru_llama_cpp" / "bin" / "llama-server.exe"
@@ -178,6 +178,83 @@ def mineru_version() -> str | None:
         return importlib.metadata.version("mineru")
     except Exception:  # noqa: BLE001
         return None
+
+
+# --------------------------------------------------------------------------
+# 上游 WebUI 的「档位上限」参数 —— 上游改过名也改过语义，一律运行时现探
+# --------------------------------------------------------------------------
+TIER_ORDER: tuple[str, ...] = ("flash", "basic", "standard", "advanced")
+
+
+def upstream_webui_tier_flag() -> str | None:
+    """上游 WebUI 里「档位上限」那个命令行选项的名字；探不到返回 None。
+
+    上游改过一次名：4.0.x 是 ``--api-server-tier``，4.1.x 起是 ``--tier``。
+    与其记版本号（记了也会忘了更新），不如直接看 webui 命令声明的 typer 参数。
+    """
+    try:
+        import inspect
+
+        from mineru.kit.commands import webui as upstream_webui
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        parameters = inspect.signature(upstream_webui.webui_cmd).parameters
+    except (AttributeError, TypeError, ValueError):
+        return None
+    for name, param in parameters.items():
+        decls = getattr(param.default, "param_decls", None) or ()
+        flags = [d for d in decls if isinstance(d, str) and d.startswith("--")]
+        if "--api-server-tier" in flags:
+            return "--api-server-tier"
+        if name == "tier" and "--tier" in flags:
+            return "--tier"
+    return None
+
+
+def upstream_ceiling_for(tiers: tuple[str, ...]) -> str | None:
+    """反查：想让界面出现且仅出现 ``tiers`` 这几档，上限该设成哪个值。
+
+    同一件事两版不一样：
+      4.0.x  standard -> flash/basic/standard/advanced（那时没有独立的 advanced 上限）
+      4.1.x  advanced -> flash/basic/standard/advanced（standard 只放到 standard）
+    所以「全开」到底传 standard 还是 advanced，只能按上游映射表反查，不能写死。
+    """
+    try:
+        from mineru.types import TIERS_BY_SERVER_TIER
+    except Exception:  # noqa: BLE001
+        return None
+    wanted = tuple(tiers)
+    for ceiling, covered in TIERS_BY_SERVER_TIER.items():
+        if tuple(covered) == wanted:
+            return ceiling
+    return None
+
+
+def webui_tier_names(*, want_all: bool) -> tuple[str, ...]:
+    """界面里预计会出现的档位名（只给文案用）；探不到就按四档/两档兜底。"""
+    ceiling = upstream_ceiling_for(TIER_ORDER if want_all else TIER_ORDER[:2])
+    if ceiling is not None:
+        try:
+            from mineru.types import TIERS_BY_SERVER_TIER
+
+            covered = TIERS_BY_SERVER_TIER.get(ceiling)
+            if covered:
+                return tuple(covered)
+        except Exception:  # noqa: BLE001
+            pass
+    return TIER_ORDER if want_all else TIER_ORDER[:2]
+
+
+def webui_tier_args(*, want_all: bool) -> list[str]:
+    """拼出 WebUI 的档位上限参数；有一环拿不准就返回空列表，交给上游默认值。"""
+    flag = upstream_webui_tier_flag()
+    if flag is None:
+        return []
+    ceiling = upstream_ceiling_for(TIER_ORDER if want_all else TIER_ORDER[:2])
+    if ceiling is None:
+        return []
+    return [flag, ceiling]
 
 
 def everything_ready() -> bool:

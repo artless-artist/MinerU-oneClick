@@ -30,6 +30,10 @@
 /_tmp/
 /_cache/
 
+# --- 托管服务的单实例锁（api_server 起 WebUI 时写在根目录）------------------
+/.mineru-service.lock
+/.mineru-service.lock.*
+
 # --- 文档库（doclib）运行期状态 --------------------------------------------
 #     SQLite 文档库 + WAL + 端点信息（含 PID / server_id），全属本机运行时产物，
 #     换台机器就没有意义，且可能泄露本机路径，一律不入库。

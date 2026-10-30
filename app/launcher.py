@@ -201,24 +201,19 @@ def remembered_tier() -> str:
     return "standard" if env_setup.path_is_ascii() else "basic"
 
 
-def webui_server_tier() -> str:
-    """WebUI 该对外广告到哪一档 —— 由「本机实际装了什么」决定，而不是去问使用者。
+def webui_full_tiers() -> bool:
+    """WebUI 该不该对外广告全部档位 —— 由「本机实际装了什么」决定，而不是去问使用者。
 
-    为什么这里不能问：WebUI 界面里本身就有一个档位滑块，它的候选项来自
-    服务端广告出来的能力（`mineru-kit webui --api-server-tier`，
-    上游 `TIERS_BY_SERVER_TIER`）：
+    为什么这里不能问：界面里本身就有一个档位滑块，候选项来自服务端广告出来的能力。
+    启动前再问一遍，除了多余，还会把界面的选项从 4 个砍成 2 个 —— 明明装全了
+    模型的人，反而在界面里找不到 standard / advanced。所以只判断「最高能跑到哪」，
+    把具体选哪档留给界面。
 
-        --api-server-tier standard -> flash / basic / standard / advanced
-        --api-server-tier basic    -> flash / basic
-
-    启动前再问一遍，除了多余，还会把界面里的选项从 4 个砍成 2 个 ——
-    明明装全了模型的人，反而在界面里找不到 standard / advanced。
-    所以这里只判断「最高能跑到哪」，把选择权交回界面。
+    为什么也不用上游的 `--tier auto`：它只看硬件、不看模型 —— CPU 机器哪怕 VLM
+    装齐了也只放开两档，GPU 机器哪怕只有小模型也放开四档（一选就报模型未就绪）。
     """
     small, vlm = models_ready()
-    if small and vlm and env_setup.path_is_ascii():
-        return "standard"
-    return "basic"
+    return small and vlm and env_setup.path_is_ascii()
 
 
 def resolve_tier(tier: str, *, where: str) -> str:
@@ -268,8 +263,9 @@ def action_webui() -> None:
     port = env_setup.find_free_port(7860)
     url = f"http://127.0.0.1:{port}"
 
-    # 不再询问档位：界面里本来就有档位选择器，这里只把「本机能跑的最高档」透传过去。
-    tier = webui_server_tier()
+    # 不再询问档位：界面里本来就有档位选择器，这里只决定「本机能跑到哪一档」。
+    full = webui_full_tiers()
+    tier = "standard" if full else "basic"   # 补齐时用的档位（自写层的叫法）
     if missing_modules() or not models_ready_for(tier):
         print()
         print(f"  补齐 {tier} 档所需组件…")
@@ -286,10 +282,8 @@ def action_webui() -> None:
     print(f"      {url}")
     print("  首次解析需要加载模型，可能要等几十秒。")
     print("  关闭时：回到本窗口按 Ctrl+C，或直接关掉本窗口。")
-    if tier == "standard":
-        print("  档位在界面内切换：flash / basic / standard / advanced")
-    else:
-        print("  档位在界面内切换：flash / basic")
+    print(f"  档位在界面内切换：{' / '.join(pkg_info.webui_tier_names(want_all=full))}")
+    if not full:
         if not env_setup.path_is_ascii():
             print("  （本包路径含非英文字符，版面 VLM 无法加载，故只开放这两档；")
             print("    移到纯英文路径后即可解锁 standard / advanced）")
@@ -308,8 +302,9 @@ def action_webui() -> None:
             str(port),
             "--output-dir",
             str(OUTPUT_DIR),
-            "--api-server-tier",
-            tier,
+            # 参数名与取值都随上游变过（4.0.x: --api-server-tier standard；
+            # 4.1.x: --tier advanced），由 pkg_info 现探，探不到就不传。
+            *pkg_info.webui_tier_args(want_all=full),
         ]
     )
     pause()
@@ -474,8 +469,21 @@ def action_selfcheck() -> None:
     except Exception as exc:  # noqa: BLE001
         print(f"      ONNX 后端探测失败 : {exc}")
 
+    print("[8] WebUI 档位参数:")
+    tier_flag = pkg_info.upstream_webui_tier_flag()
+    if tier_flag is None:
+        print("      识别失败        : 上游换了参数名，启动器将不传该参数（退回上游默认）")
+    else:
+        full_args = " ".join(pkg_info.webui_tier_args(want_all=True)) or "(不传)"
+        basic_args = " ".join(pkg_info.webui_tier_args(want_all=False)) or "(不传)"
+        print(f"      上限参数        : {tier_flag}")
+        print(f"      模型装齐时      : {full_args}"
+              f"  -> 界面 {' / '.join(pkg_info.webui_tier_names(want_all=True))}")
+        print(f"      只有小模型时    : {basic_args}"
+              f"  -> 界面 {' / '.join(pkg_info.webui_tier_names(want_all=False))}")
+
     print()
-    print("[8] 用 MinerU 官方命令复核模型状态：")
+    print("[9] 用 MinerU 官方命令复核模型状态：")
     run_mineru(["mineru-kit", "models", "verify", "--tier", "standard"])
 
     print()
